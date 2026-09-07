@@ -41,7 +41,7 @@ export async function exportarPDF(
 
   const doc = new jsPDF();
   doc.setFontSize(16);
-  doc.text('GFP - Gestão Financeira Pessoal', 14, 18);
+  doc.text('Fin JM - Gestão Financeira Pessoal', 14, 18);
   doc.setFontSize(10);
   doc.text(`Relatório gerado em ${new Date().toLocaleDateString('pt-PT')}`, 14, 25);
 

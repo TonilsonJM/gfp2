@@ -34,7 +34,7 @@ export default function LoginPage() {
     <div className="mx-auto flex max-w-sm flex-col gap-6 py-10">
       <div className="text-center">
         <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">
-          Entrar no GFP
+          Entrar no Fin JM
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">
           Acesse a sua gestão financeira de qualquer dispositivo.
@@ -45,14 +45,13 @@ export default function LoginPage() {
         <CardContent className="pt-6">
           <form onSubmit={onSubmit} className="flex flex-col gap-4">
             <div>
-              <Label htmlFor="email">E-mail</Label>
+              <Label htmlFor="email">E-mail ou nome de utilizador</Label>
               <Input
                 id="email"
-                type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="seu@email.com"
+                placeholder="seu@email.com ou o seu utilizador"
               />
             </div>
             <div>

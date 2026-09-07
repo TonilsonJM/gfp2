@@ -24,10 +24,10 @@ export default function HomePage() {
     <div className="flex flex-col items-center gap-12 py-10 text-center">
       <div className="max-w-2xl">
         <span className="mb-4 inline-block rounded-full bg-gradient-to-r from-verde-500 to-azul-500 px-4 py-1 text-xs font-semibold text-white">
-          GFP
+          FJM
         </span>
         <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-gray-100">
-          Gestão Financeira Pessoal
+          Fin JM
         </h1>
         <p className="mt-4 text-gray-600 dark:text-gray-300">
           Organize as suas carteiras, controle entradas e saídas, defina metas

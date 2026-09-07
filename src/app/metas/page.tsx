@@ -11,7 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
-import { Plus, Pencil, Trash2, Target } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Plus, Pencil, Trash2, Target, TrendingUp } from 'lucide-react';
 
 export default function MetasPage() {
   return (
@@ -26,6 +27,7 @@ function MetasConteudo() {
   const [metas, setMetas] = useState<Goal[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [carregando, setCarregando] = useState(true);
+  const [contribuicoesAplicadas, setContribuicoesAplicadas] = useState(0);
 
   const [dialogAberto, setDialogAberto] = useState(false);
   const [editando, setEditando] = useState<Goal | null>(null);
@@ -34,6 +36,7 @@ function MetasConteudo() {
   const [valorAtual, setValorAtual] = useState('0');
   const [dataLimite, setDataLimite] = useState('');
   const [walletId, setWalletId] = useState('');
+  const [contribuicaoMensal, setContribuicaoMensal] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
 
@@ -45,10 +48,44 @@ function MetasConteudo() {
     setMetas((m as Goal[]) || []);
     setWallets((w as Wallet[]) || []);
     setCarregando(false);
+    return (m as Goal[]) || [];
+  };
+
+  // Aplica automaticamente a contribuição mensal das metas que ainda
+  // não receberam a contribuição deste mês
+  const aplicarContribuicoesPendentes = async (lista: Goal[]) => {
+    const hoje = new Date();
+    const hojeStr = hoje.toISOString().slice(0, 10);
+    let aplicadas = 0;
+
+    for (const m of lista) {
+      if (!m.contribuicao_mensal || m.contribuicao_mensal <= 0) continue;
+      const ultimo = m.ultimo_mes_contribuicao ? new Date(m.ultimo_mes_contribuicao) : null;
+      const jaAplicadaEsteMes =
+        ultimo && ultimo.getMonth() === hoje.getMonth() && ultimo.getFullYear() === hoje.getFullYear();
+      if (jaAplicadaEsteMes) continue;
+
+      const novoValor = Math.min(Number(m.valor_alvo), Number(m.valor_atual) + Number(m.contribuicao_mensal));
+      const { error } = await supabase
+        .from('goals')
+        .update({ valor_atual: novoValor, ultimo_mes_contribuicao: hojeStr })
+        .eq('id', m.id);
+      if (!error) aplicadas++;
+    }
+
+    if (aplicadas > 0) {
+      setContribuicoesAplicadas(aplicadas);
+      carregar();
+    }
   };
 
   useEffect(() => {
-    if (user) carregar();
+    if (!user) return;
+    (async () => {
+      const lista = await carregar();
+      await aplicarContribuicoesPendentes(lista);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const abrirNova = () => {
@@ -58,6 +95,7 @@ function MetasConteudo() {
     setValorAtual('0');
     setDataLimite('');
     setWalletId('');
+    setContribuicaoMensal('');
     setErro(null);
     setDialogAberto(true);
   };
@@ -69,6 +107,7 @@ function MetasConteudo() {
     setValorAtual(String(m.valor_atual));
     setDataLimite(m.data_limite || '');
     setWalletId(m.wallet_id || '');
+    setContribuicaoMensal(m.contribuicao_mensal != null ? String(m.contribuicao_mensal) : '');
     setErro(null);
     setDialogAberto(true);
   };
@@ -84,6 +123,7 @@ function MetasConteudo() {
       valor_atual: Number(valorAtual),
       data_limite: dataLimite || null,
       wallet_id: walletId || null,
+      contribuicao_mensal: contribuicaoMensal ? Number(contribuicaoMensal) : null,
     };
 
     const { error } = editando
@@ -113,7 +153,11 @@ function MetasConteudo() {
         <div>
           <h1 className="text-2xl font-bold text-gray-800 dark:text-gray-100">Metas Financeiras</h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {isPro ? 'Plano PRO: metas avançadas disponíveis.' : 'Defina os seus objetivos de poupança.'}
+            {contribuicoesAplicadas > 0
+              ? `${contribuicoesAplicadas} meta(s) receberam a contribuição automática deste mês.`
+              : isPro
+              ? 'Plano PRO: metas avançadas disponíveis.'
+              : 'Defina os seus objetivos de poupança.'}
           </p>
         </div>
         <Button onClick={abrirNova}>
@@ -127,11 +171,18 @@ function MetasConteudo() {
           return (
             <Card key={m.id}>
               <CardContent className="flex flex-col gap-3 py-5">
-                <div className="flex items-center gap-2">
-                  <div className="rounded-lg bg-verde-50 p-2 dark:bg-verde-900/30">
-                    <Target size={18} className="text-verde-600 dark:text-verde-400" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="rounded-lg bg-verde-50 p-2 dark:bg-verde-900/30">
+                      <Target size={18} className="text-verde-600 dark:text-verde-400" />
+                    </div>
+                    <p className="font-semibold text-gray-800 dark:text-gray-100">{m.nome}</p>
                   </div>
-                  <p className="font-semibold text-gray-800 dark:text-gray-100">{m.nome}</p>
+                  {m.contribuicao_mensal != null && m.contribuicao_mensal > 0 && (
+                    <Badge variant="entrada">
+                      <TrendingUp size={10} className="mr-1 inline" /> Auto
+                    </Badge>
+                  )}
                 </div>
 
                 <div>
@@ -145,6 +196,12 @@ function MetasConteudo() {
                     {formatarKz(Number(m.valor_atual))} de {formatarKz(Number(m.valor_alvo))} ({progresso.toFixed(0)}%)
                   </p>
                 </div>
+
+                {m.contribuicao_mensal != null && m.contribuicao_mensal > 0 && (
+                  <p className="text-xs text-azul-600 dark:text-azul-400">
+                    +{formatarKz(Number(m.contribuicao_mensal))} adicionados automaticamente todo mês
+                  </p>
+                )}
 
                 {m.data_limite && (
                   <p className="text-xs text-gray-400">Prazo: {m.data_limite}</p>
@@ -187,6 +244,18 @@ function MetasConteudo() {
           <div>
             <Label htmlFor="valorAtual">Valor Atual (Kz)</Label>
             <Input id="valorAtual" type="number" step="0.01" value={valorAtual} onChange={(e) => setValorAtual(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="contribuicaoMensal">Contribuição automática mensal (Kz, opcional)</Label>
+            <Input
+              id="contribuicaoMensal"
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="Ex: 5000 — a app soma sozinha todo mês"
+              value={contribuicaoMensal}
+              onChange={(e) => setContribuicaoMensal(e.target.value)}
+            />
           </div>
           <div>
             <Label htmlFor="carteira">Carteira associada (opcional)</Label>

@@ -4,15 +4,16 @@ import { useEffect, useMemo, useState } from 'react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
-import { Wallet, Transaction, formatarKz, LIMITES_FREE } from '@/lib/types';
+import { Wallet, Transaction, WalletMember, formatarKz, LIMITES_FREE } from '@/lib/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import ModalTornarPro from '@/components/ModalTornarPro';
-import { Plus, Pencil, Trash2, Wallet as WalletIcon } from 'lucide-react';
+import { Plus, Pencil, Trash2, Wallet as WalletIcon, Users, Mail, X } from 'lucide-react';
 
 export default function CarteirasPage() {
   return (
@@ -26,6 +27,7 @@ function CarteirasConteudo() {
   const { user, isPro } = useAuth();
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [transacoes, setTransacoes] = useState<Transaction[]>([]);
+  const [membros, setMembros] = useState<WalletMember[]>([]);
   const [carregando, setCarregando] = useState(true);
 
   const [dialogAberto, setDialogAberto] = useState(false);
@@ -37,19 +39,34 @@ function CarteirasConteudo() {
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
 
+  // membros da carteira
+  const [membrosAberto, setMembrosAberto] = useState(false);
+  const [carteiraMembros, setCarteiraMembros] = useState<Wallet | null>(null);
+  const [emailConvite, setEmailConvite] = useState('');
+  const [papelConvite, setPapelConvite] = useState<'editor' | 'visualizador'>('editor');
+  const [erroConvite, setErroConvite] = useState<string | null>(null);
+  const [convidando, setConvidando] = useState(false);
+
   const carregar = async () => {
-    const [{ data: w }, { data: t }] = await Promise.all([
+    const [{ data: w }, { data: t }, { data: m }] = await Promise.all([
       supabase.from('wallets').select('*').order('created_at'),
       supabase.from('transactions').select('*'),
+      supabase.from('wallet_members').select('*'),
     ]);
     setWallets((w as Wallet[]) || []);
     setTransacoes((t as Transaction[]) || []);
+    setMembros((m as WalletMember[]) || []);
     setCarregando(false);
   };
 
   useEffect(() => {
     if (user) carregar();
   }, [user]);
+
+  const minhasCarteiras = useMemo(
+    () => wallets.filter((w) => w.user_id === user?.id),
+    [wallets, user]
+  );
 
   const saldoCarteira = (id: string, saldoInicial: number) => {
     const trans = transacoes.filter((t) => t.wallet_id === id);
@@ -59,7 +76,7 @@ function CarteirasConteudo() {
   };
 
   const abrirNova = () => {
-    if (!isPro && wallets.length >= LIMITES_FREE.MAX_CARTEIRAS) {
+    if (!isPro && minhasCarteiras.length >= LIMITES_FREE.MAX_CARTEIRAS) {
       setModalProAberto(true);
       return;
     }
@@ -122,7 +139,65 @@ function CarteirasConteudo() {
     carregar();
   };
 
+  const abrirMembros = (w: Wallet) => {
+    setCarteiraMembros(w);
+    setEmailConvite('');
+    setPapelConvite('editor');
+    setErroConvite(null);
+    setMembrosAberto(true);
+  };
+
+  const convidar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!carteiraMembros) return;
+    setConvidando(true);
+    setErroConvite(null);
+
+    let emailFinal = emailConvite.trim().toLowerCase();
+
+    // Se não parece um e-mail, trata como nome de utilizador e resolve
+    if (!emailFinal.includes('@')) {
+      const { data: emailEncontrado, error: erroBusca } = await supabase.rpc(
+        'obter_email_por_username',
+        { p_username: emailFinal }
+      );
+      if (erroBusca || !emailEncontrado) {
+        setConvidando(false);
+        setErroConvite('Nenhum utilizador encontrado com esse nome.');
+        return;
+      }
+      emailFinal = emailEncontrado as string;
+    }
+
+    const { error } = await supabase.from('wallet_members').insert({
+      wallet_id: carteiraMembros.id,
+      convidado_email: emailFinal,
+      papel: papelConvite,
+    });
+
+    setConvidando(false);
+    if (error) {
+      setErroConvite(
+        error.message.includes('duplicate') || error.message.includes('unique')
+          ? 'Esta pessoa já foi convidada para esta carteira.'
+          : error.message
+      );
+      return;
+    }
+    setEmailConvite('');
+    carregar();
+  };
+
+  const removerMembro = async (id: string) => {
+    await supabase.from('wallet_members').delete().eq('id', id);
+    carregar();
+  };
+
   if (carregando) return <p className="text-center text-gray-400 py-10">A carregar...</p>;
+
+  const membrosDaCarteira = carteiraMembros
+    ? membros.filter((m) => m.wallet_id === carteiraMembros.id)
+    : [];
 
   return (
     <div className="flex flex-col gap-5">
@@ -132,7 +207,7 @@ function CarteirasConteudo() {
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {isPro
               ? 'Plano PRO: carteiras ilimitadas.'
-              : `Plano FREE: ${wallets.length}/${LIMITES_FREE.MAX_CARTEIRAS} carteiras usadas.`}
+              : `Plano FREE: ${minhasCarteiras.length}/${LIMITES_FREE.MAX_CARTEIRAS} carteiras usadas.`}
           </p>
         </div>
         <Button onClick={abrirNova}>
@@ -143,6 +218,8 @@ function CarteirasConteudo() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {wallets.map((w) => {
           const saldo = saldoCarteira(w.id, Number(w.saldo_inicial));
+          const souDono = w.user_id === user?.id;
+          const qtdMembros = membros.filter((m) => m.wallet_id === w.id && m.status === 'aceite').length;
           return (
             <Card key={w.id}>
               <CardContent className="flex flex-col gap-3 py-5">
@@ -158,6 +235,8 @@ function CarteirasConteudo() {
                       )}
                     </div>
                   </div>
+                  {!souDono && <Badge variant="default">Partilhada comigo</Badge>}
+                  {souDono && qtdMembros > 0 && <Badge variant="default">Em grupo</Badge>}
                 </div>
                 <p
                   className={`text-xl font-bold ${
@@ -166,13 +245,20 @@ function CarteirasConteudo() {
                 >
                   {formatarKz(saldo)}
                 </p>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => abrirEdicao(w)}>
-                    <Pencil size={14} /> Editar
-                  </Button>
-                  <Button size="sm" variant="destructive" onClick={() => remover(w.id)}>
-                    <Trash2 size={14} /> Eliminar
-                  </Button>
+                <div className="flex flex-wrap gap-2">
+                  {souDono && (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => abrirEdicao(w)}>
+                        <Pencil size={14} /> Editar
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => abrirMembros(w)}>
+                        <Users size={14} /> Membros
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => remover(w.id)}>
+                        <Trash2 size={14} /> Eliminar
+                      </Button>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -226,6 +312,82 @@ function CarteirasConteudo() {
             {salvando ? 'A guardar...' : 'Guardar'}
           </Button>
         </form>
+      </Dialog>
+
+      <Dialog
+        aberto={membrosAberto}
+        aoFechar={() => setMembrosAberto(false)}
+        titulo={`Membros de "${carteiraMembros?.nome || ''}"`}
+      >
+        <div className="flex flex-col gap-4">
+          <form onSubmit={convidar} className="flex flex-col gap-3">
+            <div>
+              <Label htmlFor="emailConvite">Convidar por e-mail ou nome de utilizador</Label>
+              <div className="relative">
+                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Input
+                  id="emailConvite"
+                  required
+                  className="pl-9"
+                  placeholder="pessoa@email.com ou nome_de_utilizador"
+                  value={emailConvite}
+                  onChange={(e) => setEmailConvite(e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="papelConvite">Papel</Label>
+              <Select
+                id="papelConvite"
+                value={papelConvite}
+                onChange={(e) => setPapelConvite(e.target.value as 'editor' | 'visualizador')}
+              >
+                <option value="editor">Editor (pode lançar transações)</option>
+                <option value="visualizador">Visualizador (só vê)</option>
+              </Select>
+            </div>
+            {erroConvite && <p className="text-sm text-red-500">{erroConvite}</p>}
+            <Button type="submit" size="sm" disabled={convidando}>
+              {convidando ? 'A convidar...' : 'Convidar'}
+            </Button>
+            <p className="text-xs text-gray-400">
+              Convide pelo e-mail ou pelo nome de utilizador da pessoa. Ela
+              precisa de já ter uma conta no Fin JM — assim que fizer login,
+              ganha acesso automaticamente.
+            </p>
+          </form>
+
+          <div className="border-t border-gray-100 pt-3 dark:border-gray-800">
+            <p className="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">
+              Membros atuais
+            </p>
+            <div className="flex flex-col gap-2">
+              {membrosDaCarteira.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex items-center justify-between rounded-lg border border-gray-100 p-2 text-sm dark:border-gray-800"
+                >
+                  <div>
+                    <p className="text-gray-700 dark:text-gray-200">{m.convidado_email}</p>
+                    <p className="text-xs text-gray-400">
+                      {m.papel === 'editor' ? 'Editor' : 'Visualizador'} ·{' '}
+                      {m.status === 'aceite' ? 'Aceite' : 'Convite pendente'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => removerMembro(m.id)}
+                    className="text-gray-400 hover:text-red-500"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              ))}
+              {membrosDaCarteira.length === 0 && (
+                <p className="text-xs text-gray-400">Nenhum membro convidado ainda.</p>
+              )}
+            </div>
+          </div>
+        </div>
       </Dialog>
 
       <ModalTornarPro aberto={modalProAberto} aoFechar={() => setModalProAberto(false)} />

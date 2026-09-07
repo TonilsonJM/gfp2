@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useAuth } from '@/context/AuthContext';
 import { supabase } from '@/lib/supabaseClient';
@@ -14,7 +15,17 @@ import { Dialog } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import ModalTornarPro from '@/components/ModalTornarPro';
 import { exportarJSON, exportarPDF, exportarExcel } from '@/lib/exportUtils';
-import { Plus, Trash2, Download, FileSpreadsheet, FileText } from 'lucide-react';
+import {
+  Plus,
+  Trash2,
+  Pencil,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Search,
+  ArrowRightLeft,
+  Repeat,
+} from 'lucide-react';
 
 export default function TransacoesPage() {
   return (
@@ -32,14 +43,16 @@ function TransacoesConteudo() {
   const [carregando, setCarregando] = useState(true);
 
   // filtros
+  const [busca, setBusca] = useState('');
   const [filtroCarteira, setFiltroCarteira] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('');
   const [filtroInicio, setFiltroInicio] = useState('');
   const [filtroFim, setFiltroFim] = useState('');
 
-  // dialog nova transação
+  // dialog nova/editar transação
   const [dialogAberto, setDialogAberto] = useState(false);
   const [modalProAberto, setModalProAberto] = useState(false);
+  const [editando, setEditando] = useState<Transaction | null>(null);
   const [tipo, setTipo] = useState<'entrada' | 'saida'>('saida');
   const [walletId, setWalletId] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -48,6 +61,16 @@ function TransacoesConteudo() {
   const [descricao, setDescricao] = useState('');
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
+
+  // dialog de transferência entre carteiras
+  const [transferAberto, setTransferAberto] = useState(false);
+  const [origemId, setOrigemId] = useState('');
+  const [destinoId, setDestinoId] = useState('');
+  const [valorTransfer, setValorTransfer] = useState('');
+  const [dataTransfer, setDataTransfer] = useState(new Date().toISOString().slice(0, 10));
+  const [descTransfer, setDescTransfer] = useState('');
+  const [erroTransfer, setErroTransfer] = useState<string | null>(null);
+  const [salvandoTransfer, setSalvandoTransfer] = useState(false);
 
   const carregar = async () => {
     const [{ data: w }, { data: c }, { data: t }] = await Promise.all([
@@ -71,9 +94,10 @@ function TransacoesConteudo() {
       if (filtroCategoria && t.category_id !== filtroCategoria) return false;
       if (filtroInicio && t.data < filtroInicio) return false;
       if (filtroFim && t.data > filtroFim) return false;
+      if (busca && !(t.descricao || '').toLowerCase().includes(busca.toLowerCase())) return false;
       return true;
     });
-  }, [transacoes, filtroCarteira, filtroCategoria, filtroInicio, filtroFim]);
+  }, [transacoes, filtroCarteira, filtroCategoria, filtroInicio, filtroFim, busca]);
 
   const contagemMesAtual = useMemo(() => {
     const hoje = new Date();
@@ -92,6 +116,7 @@ function TransacoesConteudo() {
       setModalProAberto(true);
       return;
     }
+    setEditando(null);
     setTipo('saida');
     setWalletId(wallets[0]?.id || '');
     setCategoryId('');
@@ -102,10 +127,45 @@ function TransacoesConteudo() {
     setDialogAberto(true);
   };
 
+  const abrirEdicao = (t: Transaction) => {
+    setEditando(t);
+    setTipo(t.tipo);
+    setWalletId(t.wallet_id);
+    setCategoryId(t.category_id || '');
+    setValor(String(t.valor));
+    setData(t.data);
+    setDescricao(t.descricao || '');
+    setErro(null);
+    setDialogAberto(true);
+  };
+
   const salvar = async (e: React.FormEvent) => {
     e.preventDefault();
     setSalvando(true);
     setErro(null);
+
+    if (editando) {
+      const { error } = await supabase
+        .from('transactions')
+        .update({
+          wallet_id: walletId,
+          category_id: categoryId || null,
+          tipo,
+          valor: Number(valor),
+          data,
+          descricao,
+        })
+        .eq('id', editando.id);
+
+      setSalvando(false);
+      if (error) {
+        setErro(error.message);
+        return;
+      }
+      setDialogAberto(false);
+      carregar();
+      return;
+    }
 
     const { error } = await supabase.from('transactions').insert({
       user_id: user!.id,
@@ -139,10 +199,72 @@ function TransacoesConteudo() {
     carregar();
   };
 
+  const abrirTransferencia = () => {
+    if (wallets.length < 2) {
+      alert('Precisa de pelo menos 2 carteiras para transferir entre elas.');
+      return;
+    }
+    setOrigemId(wallets[0]?.id || '');
+    setDestinoId(wallets[1]?.id || '');
+    setValorTransfer('');
+    setDataTransfer(new Date().toISOString().slice(0, 10));
+    setDescTransfer('');
+    setErroTransfer(null);
+    setTransferAberto(true);
+  };
+
+  const salvarTransferencia = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (origemId === destinoId) {
+      setErroTransfer('A carteira de origem e destino devem ser diferentes.');
+      return;
+    }
+    setSalvandoTransfer(true);
+    setErroTransfer(null);
+
+    const grupoId = crypto.randomUUID();
+    const nomeOrigem = wallets.find((w) => w.id === origemId)?.nome || '';
+    const nomeDestino = wallets.find((w) => w.id === destinoId)?.nome || '';
+    const descricaoFinal = descTransfer || `Transferência: ${nomeOrigem} → ${nomeDestino}`;
+
+    const { error } = await supabase.from('transactions').insert([
+      {
+        user_id: user!.id,
+        wallet_id: origemId,
+        category_id: null,
+        tipo: 'saida',
+        valor: Number(valorTransfer),
+        data: dataTransfer,
+        descricao: descricaoFinal,
+        eh_transferencia: true,
+        transferencia_grupo_id: grupoId,
+      },
+      {
+        user_id: user!.id,
+        wallet_id: destinoId,
+        category_id: null,
+        tipo: 'entrada',
+        valor: Number(valorTransfer),
+        data: dataTransfer,
+        descricao: descricaoFinal,
+        eh_transferencia: true,
+        transferencia_grupo_id: grupoId,
+      },
+    ]);
+
+    setSalvandoTransfer(false);
+    if (error) {
+      setErroTransfer(error.message);
+      return;
+    }
+    setTransferAberto(false);
+    carregar();
+  };
+
   const categoriasDoTipo = categorias.filter((c) => c.tipo === tipo);
 
   const aoExportarJSON = () => {
-    exportarJSON(transacoesFiltradas, 'gfp-transacoes.json');
+    exportarJSON(transacoesFiltradas, 'finjm-transacoes.json');
   };
 
   const aoExportarPDF = () => {
@@ -168,38 +290,59 @@ function TransacoesConteudo() {
               : `Plano FREE: ${contagemMesAtual}/${LIMITES_FREE.MAX_TRANSACOES_MES} transações este mês.`}
           </p>
         </div>
-        <Button onClick={abrirNova}>
-          <Plus size={18} /> Nova Transação
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/recorrentes">
+            <Button variant="outline">
+              <Repeat size={18} /> Recorrentes
+            </Button>
+          </Link>
+          <Button variant="secondary" onClick={abrirTransferencia}>
+            <ArrowRightLeft size={18} /> Transferir
+          </Button>
+          <Button onClick={abrirNova}>
+            <Plus size={18} /> Nova Transação
+          </Button>
+        </div>
       </div>
 
       <Card>
-        <CardContent className="grid grid-cols-1 gap-3 py-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <Label>Carteira</Label>
-            <Select value={filtroCarteira} onChange={(e) => setFiltroCarteira(e.target.value)}>
-              <option value="">Todas</option>
-              {wallets.map((w) => (
-                <option key={w.id} value={w.id}>{w.nome}</option>
-              ))}
-            </Select>
+        <CardContent className="flex flex-col gap-3 py-4">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Input
+              className="pl-9"
+              placeholder="Buscar por descrição..."
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+            />
           </div>
-          <div>
-            <Label>Categoria</Label>
-            <Select value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
-              <option value="">Todas</option>
-              {categorias.map((c) => (
-                <option key={c.id} value={c.id}>{c.nome}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label>De</Label>
-            <Input type="date" value={filtroInicio} onChange={(e) => setFiltroInicio(e.target.value)} />
-          </div>
-          <div>
-            <Label>Até</Label>
-            <Input type="date" value={filtroFim} onChange={(e) => setFiltroFim(e.target.value)} />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <Label>Carteira</Label>
+              <Select value={filtroCarteira} onChange={(e) => setFiltroCarteira(e.target.value)}>
+                <option value="">Todas</option>
+                {wallets.map((w) => (
+                  <option key={w.id} value={w.id}>{w.nome}</option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label>Categoria</Label>
+              <Select value={filtroCategoria} onChange={(e) => setFiltroCategoria(e.target.value)}>
+                <option value="">Todas</option>
+                {categorias.map((c) => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label>De</Label>
+              <Input type="date" value={filtroInicio} onChange={(e) => setFiltroInicio(e.target.value)} />
+            </div>
+            <div>
+              <Label>Até</Label>
+              <Input type="date" value={filtroFim} onChange={(e) => setFiltroFim(e.target.value)} />
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -235,9 +378,15 @@ function TransacoesConteudo() {
                 <tr key={t.id} className="border-b border-gray-50 dark:border-gray-800/50">
                   <td className="p-3 whitespace-nowrap">{t.data}</td>
                   <td className="p-3">
-                    <Badge variant={t.tipo === 'entrada' ? 'entrada' : 'saida'}>
-                      {t.tipo === 'entrada' ? 'Entrada' : 'Saída'}
-                    </Badge>
+                    {t.eh_transferencia ? (
+                      <Badge variant="default">
+                        <ArrowRightLeft size={10} className="mr-1 inline" /> Transferência
+                      </Badge>
+                    ) : (
+                      <Badge variant={t.tipo === 'entrada' ? 'entrada' : 'saida'}>
+                        {t.tipo === 'entrada' ? 'Entrada' : 'Saída'}
+                      </Badge>
+                    )}
                   </td>
                   <td className="p-3">{wallets.find((w) => w.id === t.wallet_id)?.nome || '-'}</td>
                   <td className="p-3">{categorias.find((c) => c.id === t.category_id)?.nome || '-'}</td>
@@ -249,7 +398,13 @@ function TransacoesConteudo() {
                   >
                     {formatarKz(Number(t.valor))}
                   </td>
-                  <td className="p-3 text-right">
+                  <td className="p-3 text-right whitespace-nowrap">
+                    <button
+                      onClick={() => abrirEdicao(t)}
+                      className="mr-3 text-gray-400 hover:text-azul-500"
+                    >
+                      <Pencil size={16} />
+                    </button>
                     <button
                       onClick={() => remover(t.id)}
                       className="text-gray-400 hover:text-red-500"
@@ -271,7 +426,11 @@ function TransacoesConteudo() {
         </CardContent>
       </Card>
 
-      <Dialog aberto={dialogAberto} aoFechar={() => setDialogAberto(false)} titulo="Nova Transação">
+      <Dialog
+        aberto={dialogAberto}
+        aoFechar={() => setDialogAberto(false)}
+        titulo={editando ? 'Editar Transação' : 'Nova Transação'}
+      >
         <form onSubmit={salvar} className="flex flex-col gap-4">
           <div>
             <Label>Tipo</Label>
@@ -341,6 +500,67 @@ function TransacoesConteudo() {
 
           <Button type="submit" disabled={salvando}>
             {salvando ? 'A guardar...' : 'Guardar'}
+          </Button>
+        </form>
+      </Dialog>
+
+      <Dialog
+        aberto={transferAberto}
+        aoFechar={() => setTransferAberto(false)}
+        titulo="Transferir entre Carteiras"
+      >
+        <form onSubmit={salvarTransferencia} className="flex flex-col gap-4">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Move dinheiro de uma carteira para outra sem contar como gasto ou
+            receita real nos gráficos do Dashboard.
+          </p>
+          <div>
+            <Label htmlFor="origem">Carteira de Origem</Label>
+            <Select id="origem" required value={origemId} onChange={(e) => setOrigemId(e.target.value)}>
+              {wallets.map((w) => (
+                <option key={w.id} value={w.id}>{w.nome}</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="destino">Carteira de Destino</Label>
+            <Select id="destino" required value={destinoId} onChange={(e) => setDestinoId(e.target.value)}>
+              {wallets.map((w) => (
+                <option key={w.id} value={w.id}>{w.nome}</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label htmlFor="valorTransfer">Valor (Kz)</Label>
+            <Input
+              id="valorTransfer"
+              type="number"
+              step="0.01"
+              min="0.01"
+              required
+              value={valorTransfer}
+              onChange={(e) => setValorTransfer(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="dataTransfer">Data</Label>
+            <Input
+              id="dataTransfer"
+              type="date"
+              required
+              value={dataTransfer}
+              onChange={(e) => setDataTransfer(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label htmlFor="descTransfer">Descrição (opcional)</Label>
+            <Input id="descTransfer" value={descTransfer} onChange={(e) => setDescTransfer(e.target.value)} />
+          </div>
+
+          {erroTransfer && <p className="text-sm text-red-500">{erroTransfer}</p>}
+
+          <Button type="submit" variant="secondary" disabled={salvandoTransfer}>
+            {salvandoTransfer ? 'A transferir...' : 'Transferir'}
           </Button>
         </form>
       </Dialog>

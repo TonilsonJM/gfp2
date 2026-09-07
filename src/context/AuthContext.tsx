@@ -20,9 +20,10 @@ interface AuthContextValue {
   isPro: boolean;
   isAdmin: boolean;
   refreshProfile: () => Promise<void>;
-  signIn: (email: string, senha: string) => Promise<{ error: string | null }>;
+  signIn: (identificador: string, senha: string) => Promise<{ error: string | null }>;
   signUp: (
     nome: string,
+    username: string,
     email: string,
     senha: string
   ) => Promise<{ error: string | null }>;
@@ -38,6 +39,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const carregarPerfil = useCallback(async (userId: string) => {
+    // Liga convites de carteiras partilhadas pendentes para este e-mail
+    await supabase.rpc('aceitar_convites_pendentes');
     const { data } = await supabase
       .from('profiles')
       .select('*')
@@ -76,7 +79,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => listener.subscription.unsubscribe();
   }, [carregarPerfil]);
 
-  const signIn = async (email: string, senha: string) => {
+  // Aceita e-mail OU nome de utilizador. Se não tiver "@", resolve o
+  // e-mail correspondente ao username antes de autenticar.
+  const signIn = async (identificador: string, senha: string) => {
+    let email = identificador.trim();
+
+    if (!email.includes('@')) {
+      const { data: emailEncontrado, error: erroBusca } = await supabase.rpc(
+        'obter_email_por_username',
+        { p_username: email.toLowerCase() }
+      );
+      if (erroBusca || !emailEncontrado) {
+        return { error: 'Utilizador não encontrado.' };
+      }
+      email = emailEncontrado as string;
+    }
+
     const { error } = await supabase.auth.signInWithPassword({
       email,
       password: senha,
@@ -84,11 +102,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error ? traduzirErro(error.message) : null };
   };
 
-  const signUp = async (nome: string, email: string, senha: string) => {
+  const signUp = async (nome: string, username: string, email: string, senha: string) => {
     const { error } = await supabase.auth.signUp({
       email,
       password: senha,
-      options: { data: { nome } },
+      options: { data: { nome, username: username.toLowerCase() } },
     });
     return { error: error ? traduzirErro(error.message) : null };
   };
@@ -121,8 +139,14 @@ export function useAuth() {
 }
 
 function traduzirErro(msg: string): string {
-  if (msg.includes('Invalid login credentials')) return 'E-mail ou senha inválidos.';
+  if (msg.includes('Invalid login credentials')) return 'E-mail/utilizador ou senha inválidos.';
   if (msg.includes('User already registered')) return 'Este e-mail já está registado.';
   if (msg.includes('Password should be at least')) return 'A senha deve ter pelo menos 6 caracteres.';
+  if (msg.includes('profiles_username_key') || msg.includes('duplicate') && msg.includes('username')) {
+    return 'Este nome de utilizador já está em uso.';
+  }
+  if (msg.includes('profiles_username_format')) {
+    return 'Nome de utilizador inválido: use só minúsculas, números e "_" (3 a 20 caracteres).';
+  }
   return msg;
 }

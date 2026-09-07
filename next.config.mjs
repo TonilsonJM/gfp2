@@ -22,6 +22,11 @@ const nextConfig = {
   trailingSlash: true,
   basePath,
   assetPrefix,
+  env: {
+    // Exposto ao código do cliente para montar caminhos absolutos
+    // (ex: registo do service worker) que respeitem o basePath do GitHub Pages
+    NEXT_PUBLIC_BASE_PATH: basePath,
+  },
 };
 
 export default nextConfig;

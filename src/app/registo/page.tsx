@@ -8,11 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
+import { REGEX_USERNAME, normalizarUsername } from '@/lib/types';
 
 export default function RegistoPage() {
   const { signUp, signIn } = useAuth();
   const router = useRouter();
   const [nome, setNome] = useState('');
+  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [erro, setErro] = useState<string | null>(null);
@@ -22,9 +24,14 @@ export default function RegistoPage() {
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErro(null);
-    setCarregando(true);
 
-    const { error } = await signUp(nome, email, senha);
+    if (!REGEX_USERNAME.test(username)) {
+      setErro('Nome de utilizador inválido: use só minúsculas, números e "_" (3 a 20 caracteres).');
+      return;
+    }
+
+    setCarregando(true);
+    const { error } = await signUp(nome, username, email, senha);
 
     if (error) {
       setErro(error);
@@ -84,6 +91,21 @@ export default function RegistoPage() {
                 onChange={(e) => setNome(e.target.value)}
                 placeholder="O seu nome"
               />
+            </div>
+            <div>
+              <Label htmlFor="username">Nome de utilizador</Label>
+              <Input
+                id="username"
+                required
+                minLength={3}
+                maxLength={20}
+                value={username}
+                onChange={(e) => setUsername(normalizarUsername(e.target.value))}
+                placeholder="ex: tonilson_jm"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                Só minúsculas, números e &quot;_&quot; — vai poder usá-lo para entrar em vez do e-mail.
+              </p>
             </div>
             <div>
               <Label htmlFor="email">E-mail</Label>

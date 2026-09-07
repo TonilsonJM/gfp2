@@ -26,3 +26,20 @@ body {
   background: rgba(148, 163, 184, 0.5);
   border-radius: 999px;
 }
+
+/* Evita que o Android/iOS façam zoom automático ao focar em campos */
+input,
+select,
+textarea {
+  font-size: 16px;
+}
+
+/* Toques mais confortáveis em ecrãs pequenos */
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  overscroll-behavior-y: none;
+}
