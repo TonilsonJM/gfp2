@@ -49,7 +49,7 @@ export default function PushManager() {
       const registro = await navigator.serviceWorker.register(caminhoComBasePath('/sw.js'));
       const subscricao = await registro.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as BufferSource,
       });
 
       const chaveP256dh = arrayBufferToBase64(subscricao.getKey('p256dh'));
